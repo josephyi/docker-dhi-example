@@ -17,6 +17,9 @@ jobs:
       - name: Test
         run: ./gradlew test
   docker:
+    permissions:
+      packages: write
+      contents: read
     strategy:
       matrix:
         platforms:
