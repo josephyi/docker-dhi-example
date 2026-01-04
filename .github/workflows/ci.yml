@@ -68,7 +68,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
           cache-to: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache,mode=max
-          outputs: type=image,name=ghcr.io/docker-dhi-example,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/josephyi/docker-dhi-example,push-by-digest=true,name-canonical=true,push=true
           sbom: true
           annotations: ${{ steps.meta.outputs.annotations }}
       - name: Export digest
