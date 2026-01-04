@@ -16,3 +16,103 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - name: Test
         run: ./gradlew test
+  docker:
+    strategy:
+      matrix:
+        platforms:
+          [
+            {
+              runner: ubuntu-latest,
+              platform: linux/amd64,
+              digest-suffix: linux-amd64
+            },
+            {
+              runner: ubuntu-24.04-arm,
+              platform: linux/arm64,
+              digest-suffix: linux-arm64
+            }
+          ]
+    name: 🐳 Dockerize 🐳
+    needs: [build]
+    runs-on: ${{ matrix.platforms.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/josephyi/docker-dhi-example
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Docker Hardened Image Registry
+        uses: docker/login-action@v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          password: ${{ secrets.DHI_REGISTRY_PASSWORD }}
+      - name: Build and Push Image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platforms.platform }}
+          provenance: mode=max
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
+          cache-to: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache,mode=max
+          outputs: type=image,name=ghcr.io/docker-dhi-example,push-by-digest=true,name-canonical=true,push=true
+          sbom: true
+          annotations: ${{ steps.meta.outputs.annotations }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-${{ matrix.platforms.digest-suffix }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - docker
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v7
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/josephyi/docker-dhi-example
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/josephyi/docker-dhi-example@sha256:%s ' *)
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ghcr.io/josephyi/docker-dhi-example:${{ steps.meta.outputs.version }}
