@@ -97,7 +97,6 @@ jobs:
           provenance: mode=max
           push: true
           labels: ${{ steps.meta.outputs.labels }}
-          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
           cache-to: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache,mode=max
           outputs: type=image,name=ghcr.io/josephyi/docker-dhi-example,push-by-digest=true,name-canonical=true,push=true
