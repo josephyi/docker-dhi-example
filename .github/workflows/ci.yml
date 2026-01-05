@@ -128,7 +128,7 @@ jobs:
         with:
           command: compare
           image: ${{ steps.meta.outputs.tags }}
-          to: ghcr.io/josephyi/docker-dhi-example:gha
+          to: ghcr.io/josephyi/docker-dhi-example:latest
           ignore-unchanged: true
           only-severities: critical,high
           github-token: ${{ secrets.GITHUB_TOKEN }}
