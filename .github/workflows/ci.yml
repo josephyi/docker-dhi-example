@@ -81,7 +81,7 @@ jobs:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platforms.platform }}
-          push: false
+          pull: true
           load: true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
