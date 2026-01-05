@@ -84,6 +84,7 @@ jobs:
           pull: true
           load: true
           labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
       - name: Build and Push Image
         if: ${{ github.event_name != 'pull_request' }}
