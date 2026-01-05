@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    tags: ["*"]
+    branches:
+      - "main"
+  pull_request:
+    branches: ["**"]
+
+env:
+  SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Test
+        run: ./gradlew test
+  docker:
+    permissions:
+      packages: write
+      contents: read
+      pull-requests: write
+    strategy:
+      matrix:
+        platforms:
+          [
+            {
+              runner: ubuntu-latest,
+              platform: linux/amd64,
+              digest-suffix: linux-amd64
+            },
+            {
+              runner: ubuntu-24.04-arm,
+              platform: linux/arm64,
+              digest-suffix: linux-arm64
+            }
+          ]
+    name: 🐳 Dockerize 🐳
+    needs: [build]
+    runs-on: ${{ matrix.platforms.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/josephyi/docker-dhi-example
+          labels: |
+            org.opencontainers.image.revision=${{ env.SHA }}
+          tags: |
+            type=edge,branch=$repo.default_branch
+            type=semver,pattern=v{{version}}
+            type=sha,prefix=,suffix=,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Authenticate to Docker Hardened Image Registry
+        uses: docker/login-action@v3
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PAT }}
+      - name: Build and Load Image (Pull Request)
+        if: ${{ github.event_name == 'pull_request' }}
+        id: build-pr
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platforms.platform }}
+          push: false
+          load: true
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
+      - name: Build and Push Image
+        if: ${{ github.event_name != 'pull_request' }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platforms.platform }}
+          provenance: mode=max
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache
+          cache-to: type=registry,ref=ghcr.io/josephyi/docker-dhi-example:buildcache,mode=max
+          outputs: type=image,name=ghcr.io/josephyi/docker-dhi-example,push-by-digest=true,name-canonical=true,push=true
+          sbom: ${{ github.event_name != 'pull_request' }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+      - name: Export digest
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-${{ matrix.platforms.digest-suffix }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      - name: Authenticate to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PAT }}
+      - name: Docker Scout
+        id: docker-scout
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: docker/scout-action@v1
+        with:
+          command: compare
+          image: ${{ steps.meta.outputs.tags }}
+          to: ghcr.io/josephyi/docker-dhi-example:gha
+          ignore-unchanged: true
+          only-severities: critical,high
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+  merge:
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      packages: write
+      contents: read
+    runs-on: ubuntu-latest
+    needs:
+      - docker
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v7
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/josephyi/docker-dhi-example
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/josephyi/docker-dhi-example@sha256:%s ' *)
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ghcr.io/josephyi/docker-dhi-example:${{ steps.meta.outputs.version }}
