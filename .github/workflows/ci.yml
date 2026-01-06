@@ -49,6 +49,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
+        id: buildx
+        with:
+          buildkitd-config-inline: |
+            [registry."dhi.io"]
+              mirrors = ["dhi.io"]
       - name: Docker Meta
         id: meta
         uses: docker/metadata-action@v5
@@ -81,7 +86,6 @@ jobs:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platforms.platform }}
-          pull: true
           load: true
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
