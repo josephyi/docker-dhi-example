@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM eclipse-temurin:25.0.1_8-jdk AS builder
-#FROM dhi.io/eclipse-temurin:25-jdk-debian13-dev AS builder
+FROM dhi.io/eclipse-temurin:25-jdk-debian13-dev AS builder
 
 # jlink requires binutils to be installed
 RUN apt update && apt-get install -y -qq binutils
@@ -35,8 +34,7 @@ RUN --mount=type=cache,target=/root/.gradle \
        --add-modules "${JAVA_RUNTIME_MODULES}" \
        --output javaruntime
 
-FROM debian:trixie-slim AS aot-cache-training-runner
-# FROM dhi.io/debian-base:trixie AS aot-cache-training-runner
+FROM dhi.io/debian-base:trixie AS aot-cache-training-runner
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 WORKDIR /workspace
